@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
@@ -38,8 +39,15 @@ func main() {
 	defer sqlDB.Close()
 
 	// Router setup
+
 	r := gin.Default()
 
+	config := cors.DefaultConfig()
+	config.AllowAllOrigins = true
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE"}
+	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Access-Control-Allow-Origin"}
+
+	r.Use(cors.New(config))
 	// Error handling
 	r.Use(middleware.ErrorHandler())
 
@@ -62,7 +70,13 @@ func main() {
 
 		// Layouts TODO: protect using auth or consider other protections
 		api.GET("/layouts", controllers.GetLayouts)
-
+		spotifyPlayback := api.Group("/spotify")
+		{
+			// spotifyPlayback.Use(middleware.AuthMiddleware())
+			spotifyPlayback.GET("/auth/login", controllers.GetSpotifyAuthLogin)
+			spotifyPlayback.GET("/auth/callback", controllers.GetSpotifyAuthCallback)
+			spotifyPlayback.GET("/auth/token", controllers.GetSpotifyAuthToken)
+		}
 	}
 
 	r.Run()
