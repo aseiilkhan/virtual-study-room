@@ -21,13 +21,11 @@ func main() {
 	}
 
 	// Connect to the database, retry up to 3 times
-	db, err := config.ConnectDatabase()
-	if err != nil {
-		panic("Failed to connect to database: " + err.Error())
-	}
+	config.DB_init()
+	db := config.DB
 
 	// Migrate the schemas
-	err = db.AutoMigrate(&models.User{}, &models.Preferences{})
+	err = db.AutoMigrate(&models.User{}, &models.Preferences{}, &models.State{})
 	if err != nil {
 		panic("Failed to migrate database: " + err.Error())
 	}
@@ -56,27 +54,23 @@ func main() {
 		// Authentication
 		api.POST("/register", controllers.Register)
 		api.POST("/login", controllers.Login)
+		api.POST("/refresh", controllers.RefreshToken)
 
-		// Preferences, only for authenticated users
-		userPreferences := api.Group("/preferences")
+		authorized := api.Group("/")
+		authorized.Use(controllers.ValidateJWT())
 		{
-			userPreferences.Use(middleware.AuthMiddleware())
-			userPreferences.GET("/", controllers.GetPreferences)
-			userPreferences.PUT("/", controllers.UpdatePreferences)
+			authorized.POST("/protected", controllers.Protected)
 		}
 
-		// Themes TODO: protect using auth or consider other protections
-		api.GET("/themes", controllers.GetThemes)
-
-		// Layouts TODO: protect using auth or consider other protections
-		api.GET("/layouts", controllers.GetLayouts)
 		spotifyPlayback := api.Group("/spotify")
+		spotifyPlayback.Use(controllers.ValidateJWT())
 		{
-			// spotifyPlayback.Use(middleware.AuthMiddleware())
 			spotifyPlayback.GET("/auth/login", controllers.GetSpotifyAuthLogin)
-			spotifyPlayback.GET("/auth/callback", controllers.GetSpotifyAuthCallback)
 			spotifyPlayback.GET("/auth/token", controllers.GetSpotifyAuthToken)
+			spotifyPlayback.GET("/auth/refresh", controllers.GetSpotifyRefreshToken)
 		}
+
+		api.GET("/spotify/auth/callback", controllers.GetSpotifyAuthCallback)
 	}
 
 	r.Run()

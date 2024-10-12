@@ -9,6 +9,16 @@ import (
 	"gorm.io/gorm"
 )
 
+var DB *gorm.DB
+
+func DB_init() {
+	var err error
+	DB, err = ConnectDatabase()
+	if err != nil {
+		fmt.Printf("Error connecting to the database: %v\n", err)
+		os.Exit(1) // Terminate the application if the database connection fails
+	}
+}
 func ConnectDatabase() (*gorm.DB, error) {
 	databaseUrl := os.Getenv("DATABASE_URL")
 	if databaseUrl == "" {

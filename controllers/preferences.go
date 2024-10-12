@@ -12,11 +12,7 @@ import (
 // Get /api/preferences
 func GetPreferences(c *gin.Context) {
 	// Connect to the database, retry up to 3 times
-	db, err := config.ConnectDatabase()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to database"})
-		return
-	}
+	db := config.DB
 
 	var preferences models.Preferences
 	userID := c.Query("userId")
@@ -33,11 +29,7 @@ func GetPreferences(c *gin.Context) {
 // PUT /api/preferences
 func UpdatePreferences(c *gin.Context) {
 	// Connect to the database, retry up to 3 times
-	db, err := config.ConnectDatabase()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to database"})
-		return
-	}
+	db := config.DB
 
 	userID := c.Query("userId")
 	var existingPrefs models.Preferences

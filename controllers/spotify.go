@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/aseiilkhan/virtual-study-room/config"
 	"github.com/aseiilkhan/virtual-study-room/models"
@@ -16,11 +17,36 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
-var access_tokens []string
-
 func GetSpotifyAuthLogin(c *gin.Context) {
-	scope := "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-library-read user-library-modify"
+	scope := "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-library-read user-library-modify user-read-currently-playing"
 	state := generateRandomString(16)
+
+	// Get the user email from the context, ensure it's a string
+	userEmail, exists := c.Get("email")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not found in context"})
+		return
+	}
+
+	emailStr, ok := userEmail.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid email type"})
+		return
+	}
+
+	// Create a new instance of the state model and save it to the DB
+	stateCache := models.State{
+		State: state,
+		Email: emailStr,
+	}
+
+	// Insert the state and email into the database
+	db := config.DB
+	if err := db.Create(&stateCache).Error; err != nil {
+		fmt.Println("Error saving state:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save state"})
+		return
+	}
 
 	// Get your client ID from the environment
 	spotifyClientID := os.Getenv("SPOTIFY_CLIENT_ID")
@@ -47,6 +73,16 @@ func GetSpotifyAuthCallback(c *gin.Context) {
 	code := c.Query("code")
 	log.Println(code)
 
+	db := config.DB
+	var stateCache models.State
+	db_search_result := db.Model(&stateCache).Where("state = ?", c.Query("state")).First(&stateCache)
+	if db_search_result.Error != nil {
+		fmt.Println(db_search_result.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch state"})
+		return
+	}
+
+	userEmail := stateCache.Email
 	// Get your client ID and secret from the environment
 	spotifyClientID := os.Getenv("SPOTIFY_CLIENT_ID")
 	spotifyClientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
@@ -67,6 +103,131 @@ func GetSpotifyAuthCallback(c *gin.Context) {
 	}
 
 	// Create a Resty client
+	client := resty.New()
+	// Make the POST request to the Spotify token endpoint
+	resp, err := client.R().
+		SetFormData(requestBody).
+		SetHeader("Authorization", "Basic "+authHeader).
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		Post("https://accounts.spotify.com/api/token")
+
+	fmt.Println(resp.String())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting token: %v", err)})
+		return
+	}
+
+	log.Println("RESP IS " + resp.String())
+	if resp.StatusCode() != http.StatusOK {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to get token"})
+		return
+	}
+
+	var result map[string]interface{} // Assuming the Spotify response is JSON
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error parsing token response: %v", err)})
+		return
+	}
+
+	accessToken, ok := result["access_token"].(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid token response format"})
+		return
+	}
+
+	expires_in, ok := result["expires_in"].(float64)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid token response format"})
+		return
+	}
+
+	expiry_time := int(expires_in) + int(time.Now().Unix())
+
+	refreshToken, ok := result["refresh_token"].(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid token response format"})
+		return
+	}
+	// Update user record with access token
+
+	var user models.User
+	db_search_resultt := db.Model(&user).Where("email = ?", userEmail).Update("spotify_token", accessToken).Update("spotify_refresh_token", refreshToken).Update("spotify_token_expires_at", expiry_time) // Update this line
+	if db_search_resultt.Error != nil {
+		fmt.Println(db_search_result.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save access token"})
+		return
+	}
+	// c.SetCookie("spotify_token", accessToken, 3600, "/", "localhost", false, true)
+	// c.SetCookie("refresh_token", result["refresh_token"].(string), 3600, "/", "localhost", false, true)
+	c.Redirect(http.StatusFound, "http://localhost:3000")
+}
+
+func GetSpotifyAuthToken(c *gin.Context) {
+	db := config.DB
+
+	var user models.User
+	userEmail, exists := c.Get("email")
+
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not found in context"})
+		return
+	}
+
+	if err := db.Where("email = ?", userEmail).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user"})
+		return
+	}
+
+	if user.SpotifyToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Access token not found for user"})
+		return
+	}
+
+	if user.SpotifyTokenExpiresAt < (time.Now().Unix()) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Access token expired"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"access_token": user.SpotifyToken, "sptotify_token_expires_at": user.SpotifyTokenExpiresAt, "refresh_token": user.SpotifyRefreshToken})
+}
+func GetSpotifyRefreshToken(c *gin.Context) {
+	db := config.DB
+	var user models.User
+
+	userEmail, exists := c.Get("email")
+	fmt.Println(userEmail)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not found in context"})
+		return
+	}
+
+	fmt.Println(userEmail)
+	if err := db.Where("email = ?", userEmail).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user"})
+		return
+	}
+
+	if user.SpotifyRefreshToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Refresh token not found for user"})
+		return
+	}
+
+	spotifyClientID := os.Getenv("SPOTIFY_CLIENT_ID")
+	spotifyClientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
+
+	if spotifyClientID == "" || spotifyClientSecret == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Spotify credentials not set"})
+		return
+	}
+
+	authHeader := base64.StdEncoding.EncodeToString([]byte(spotifyClientID + ":" + spotifyClientSecret))
+
+	// Prepare the request body
+	requestBody := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": user.SpotifyRefreshToken,
+	}
+
 	client := resty.New()
 	// Make the POST request to the Spotify token endpoint
 	resp, err := client.R().
@@ -97,37 +258,28 @@ func GetSpotifyAuthCallback(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid token response format"})
 		return
 	}
-	// userEmail, exists := c.Get("email")
-	// if !exists {
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "User email not found in context"})
-	// 	return
-	// }
-	userEmail := "testuser@example.com"
-	// Update user record with access token
-	db, err := config.ConnectDatabase()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to database"})
+
+	expires_in, ok := result["expires_in"].(float64)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid token response format"})
 		return
 	}
-	var user models.User
-	db_search_result := db.Model(&user).Where("email = ?", userEmail).Update("spotify_token", accessToken) // Update this line
+	expiry_time := int(expires_in) + int(time.Now().Unix())
+
+	refreshToken, ok := result["refresh_token"].(string)
+	if !ok {
+		refreshToken = user.SpotifyRefreshToken
+	}
+
+	db_search_result := db.Model(&user).Where("email = ?", userEmail).Update("spotify_token", accessToken).Update("spotify_refresh_token", refreshToken).Update("spotify_token_expires_at", expiry_time)
 	if db_search_result.Error != nil {
+		fmt.Println(db_search_result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save access token"})
 		return
 	}
-	c.Redirect(http.StatusFound, "http://localhost:3000?access_token="+accessToken) // Redirect to frontend
-}
 
-func GetSpotifyAuthToken(c *gin.Context) {
-	if len(access_tokens) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Access token not available"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"access_token": "BQAa1Hq-cdTqdVwrHNvKMpzoB-XkeXViPU5Gl8pD5w--7a1jMKcw4EYQLhf_6fQpQk2b713vH89ojCZUQhYeiWSpv11xorTykDcqzkL3bo-2PC0QZSsO0tSPOVuYmuxMJrJHT8kpWoCfRWf-rm6ZJAioOKx8CgClF1WlqEVDO7uDx6O6NuT6DU60hHw_lij-hE1N_3oxAARGEuRHRjaSsQqNnZkwo7Qr",
-	})
+	c.JSON(http.StatusOK, gin.H{"access_token": accessToken, "sptotify_token_expires_at": expiry_time, "refresh_token": refreshToken})
 }
-
 func generateRandomString(length int) string {
 	text := ""
 	possible := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
