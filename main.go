@@ -43,11 +43,11 @@ func main() {
 
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE"}
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Access-Control-Allow-Origin"}
 
 	// r.Use(cors.New(config))
-	r.Use(corsMiddleware())
+	r.Use(cors.New(config))
 	// Error handling
 	r.Use(middleware.ErrorHandler())
 
