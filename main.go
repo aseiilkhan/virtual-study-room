@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -45,7 +46,8 @@ func main() {
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE"}
 	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Access-Control-Allow-Origin"}
 
-	r.Use(cors.New(config))
+	// r.Use(cors.New(config))
+	r.Use(corsMiddleware())
 	// Error handling
 	r.Use(middleware.ErrorHandler())
 
@@ -55,6 +57,8 @@ func main() {
 		api.POST("/register", controllers.Register)
 		api.POST("/login", controllers.Login)
 		api.POST("/refresh", controllers.RefreshToken)
+
+		// serveHomePage handles GET requests to `/`
 
 		authorized := api.Group("/")
 		authorized.Use(controllers.ValidateJWT())
@@ -74,4 +78,21 @@ func main() {
 	}
 
 	r.Run()
+}
+
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")                                // Allow all origins
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS") // Allowed methods
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")     // Allowed headers
+
+		// If the request is OPTIONS, we return a 200 OK and abort further processing
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusOK)
+			return
+		}
+
+		// Continue to the next handler
+		c.Next()
+	}
 }
