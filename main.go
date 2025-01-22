@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 
 	"github.com/aseiilkhan/virtual-study-room/config"
 	"github.com/aseiilkhan/virtual-study-room/controllers"
@@ -14,13 +15,16 @@ import (
 )
 
 func main() {
-
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
 	// Connect to the database, retry up to 3 times
 	config.DB_init()
 	db := config.DB
 
 	// Migrate the schemas
-	err := db.AutoMigrate(&models.User{}, &models.Preferences{}, &models.State{})
+	err = db.AutoMigrate(&models.User{}, &models.Preferences{}, &models.State{})
 	if err != nil {
 		panic("Failed to migrate database: " + err.Error())
 	}

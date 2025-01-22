@@ -59,7 +59,7 @@ func GetSpotifyAuthLogin(c *gin.Context) {
 		"response_type": {"code"},
 		"client_id":     {spotifyClientID},
 		"scope":         {scope},
-		"redirect_uri":  {"https://virtual-study-room-c7879980fd07.herokuapp.com/api/spotify/auth/callback"}, // Adjust if your frontend is on a different port
+		"redirect_uri":  {"http://localhost:8080/api/spotify/auth/callback"}, // Adjust if your frontend is on a different port
 		"state":         {state},
 	}
 
@@ -98,7 +98,7 @@ func GetSpotifyAuthCallback(c *gin.Context) {
 	// Prepare the request body
 	requestBody := map[string]string{
 		"code":         code,
-		"redirect_uri": "https://virtual-study-room-c7879980fd07.herokuapp.com/api/spotify/auth/callback", // Adjust if your frontend is on a different port
+		"redirect_uri": "http://localhost:8080/api/spotify/auth/callback", // Adjust if your frontend is on a different port
 		"grant_type":   "authorization_code",
 	}
 
@@ -159,7 +159,7 @@ func GetSpotifyAuthCallback(c *gin.Context) {
 	}
 	// c.SetCookie("spotify_token", accessToken, 3600, "/", "localhost", false, true)
 	// c.SetCookie("refresh_token", result["refresh_token"].(string), 3600, "/", "localhost", false, true)
-	c.Redirect(http.StatusFound, "http://localhost:3000")
+	c.Redirect(http.StatusFound, "http://localhost:3001")
 }
 
 func GetSpotifyAuthToken(c *gin.Context) {
